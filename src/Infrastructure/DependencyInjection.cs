@@ -32,6 +32,10 @@ public static class DependencyInjection
         services.AddScoped<EntitySaveChangesInterceptor>();
         services.AddScoped<DispatchDomainEventsInterceptor>();
 
+        // Configure Vonage settings from appsettings.json
+        builder.Services.Configure<VonageSettings>(
+            builder.Configuration.GetSection(VonageSettings.SectionName));
+
         services.AddScoped<IVonageService, VonageService>();
 
         services.AddSingleton(TimeProvider.System);

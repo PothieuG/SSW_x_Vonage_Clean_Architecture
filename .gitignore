@@ -483,3 +483,10 @@ $RECYCLE.BIN/
 Claude.md
 /claude
 HISTORY.md
+/docs/VONAGE_INTEGRATION.md
+
+# Environment variables
+src/WebApi/appsettings.Development.json
+
+# Keys
+src/WebApi/Configuration/Keys/vonage_workshop_private_key.key
