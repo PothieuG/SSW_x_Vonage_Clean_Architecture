@@ -1,0 +1,8 @@
+namespace SSW_x_Vonage_Clean_Architecture.Domain.Heroes;
+
+public static class HeroErrors
+{
+    public static readonly Error NotFound = Error.NotFound(
+        "Hero.NotFound",
+        "Hero is not found");
+}
