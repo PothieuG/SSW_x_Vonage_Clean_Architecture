@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <ProjectReference Include="..\..\src\WebApi\WebApi.csproj" />
     <ProjectReference Include="..\MigrationService\MigrationService.csproj" />
   </ItemGroup>
