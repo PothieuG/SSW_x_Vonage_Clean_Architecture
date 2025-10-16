@@ -24,4 +24,10 @@ public sealed class VonageSettings
     /// The phone number that will initiate the call (must be a Vonage virtual number).
     /// </summary>
     public required string FromNumber { get; init; }
+
+    /// <summary>
+    /// The public URL where Vonage will send webhook callbacks (e.g., for recordings and transcriptions).
+    /// Must be publicly accessible. For local development, use ngrok or similar tunneling service.
+    /// </summary>
+    public required string WebhookBaseUrl { get; init; }
 }

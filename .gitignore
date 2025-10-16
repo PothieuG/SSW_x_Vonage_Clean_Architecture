@@ -481,9 +481,10 @@ $RECYCLE.BIN/
 
 # Claude files
 Claude.md
-/claude
+claude
 HISTORY.md
-/docs/VONAGE_INTEGRATION.md
+docs/VONAGE_INTEGRATION.md
+docs/RECORDING_AND_TRANSCRIPTION.md
 
 # Environment variables
 src/WebApi/appsettings.Development.json

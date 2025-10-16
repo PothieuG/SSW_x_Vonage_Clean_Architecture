@@ -52,6 +52,22 @@ internal sealed class VonageService : IVonageService
 
         try
         {
+            // Ensure webhook base URL is properly formatted
+            var webhookBaseUrl = _settings.WebhookBaseUrl.TrimEnd('/');
+
+            // Create RecordAction with transcription
+            var recordAction = new RecordAction
+            {
+                EventUrl = [$"{webhookBaseUrl}/api/calls/recorded"],
+                EndOnSilence = "3",
+                BeepStart = true,
+                Transcription = new RecordAction.TranscriptionSettings
+                {
+                    EventUrl = [$"{webhookBaseUrl}/api/calls/transcribed"],
+                    Language = "fr-FR"
+                }
+            };
+
             // Create NCCO (Nexmo Call Control Object) to define call behavior
             var ncco = new Ncco(
                 new TalkAction
@@ -59,7 +75,8 @@ internal sealed class VonageService : IVonageService
                     Text = "Bonjour, veuillez laisser un message après le bip svp.",
                     Language = "fr-FR",
                     Style = 0 // Female voice
-                }
+                },
+                recordAction
             );
 
             // Create call request
