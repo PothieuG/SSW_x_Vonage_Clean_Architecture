@@ -9,6 +9,7 @@
   </ItemGroup>
   
   <ItemGroup>
+    <PackageReference Include="Ardalis.Specification" VersionOverride="9.3.1" />
     <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" />
     <PackageReference Include="ErrorOr" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
