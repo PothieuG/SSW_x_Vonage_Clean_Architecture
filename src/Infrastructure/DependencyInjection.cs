@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence.Interceptors;
+using SSW_x_Vonage_Clean_Architecture.Infrastructure.Vonage;
 
 namespace SSW_x_Vonage_Clean_Architecture.Infrastructure;
 
@@ -30,6 +31,8 @@ public static class DependencyInjection
 
         services.AddScoped<EntitySaveChangesInterceptor>();
         services.AddScoped<DispatchDomainEventsInterceptor>();
+
+        services.AddScoped<IVonageService, VonageService>();
 
         services.AddSingleton(TimeProvider.System);
     }
