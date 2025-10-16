@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>SSW_x_Vonage_Clean_Architecture.Domain</RootNamespace>
+    <AssemblyName>SSW_x_Vonage_Clean_Architecture.Domain</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Ardalis.Specification" />
+    <PackageReference Include="ErrorOr" />
+    <PackageReference Include="MediatR.Contracts" />
+    <PackageReference Include="Vogen" />
+  </ItemGroup>
+</Project>
