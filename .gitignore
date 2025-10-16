@@ -478,3 +478,7 @@ $RECYCLE.BIN/
 
 # Rider
 .idea/
+
+# Claude files
+Claude.md
+/claude
