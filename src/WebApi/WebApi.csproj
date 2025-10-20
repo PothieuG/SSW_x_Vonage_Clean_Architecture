@@ -3,6 +3,7 @@
     <RootNamespace>SSW_x_Vonage_Clean_Architecture.WebApi</RootNamespace>
     <AssemblyName>SSW_x_Vonage_Clean_Architecture.WebApi</AssemblyName>
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <UserSecretsId>ssw-vonage-clean-architecture-webapi</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

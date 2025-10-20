@@ -2,6 +2,7 @@ using EntityFramework.Exceptions.SqlServer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
+using SSW_x_Vonage_Clean_Architecture.Infrastructure.OneDrive;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence.Interceptors;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Vonage;
@@ -37,6 +38,12 @@ public static class DependencyInjection
             builder.Configuration.GetSection(VonageSettings.SectionName));
 
         services.AddScoped<IVonageService, VonageService>();
+
+        // Configure OneDrive settings from appsettings.json
+        builder.Services.Configure<OneDriveSettings>(
+            builder.Configuration.GetSection(OneDriveSettings.SectionName));
+
+        services.AddScoped<IOneDriveService, OneDriveService>();
 
         services.AddSingleton(TimeProvider.System);
     }
