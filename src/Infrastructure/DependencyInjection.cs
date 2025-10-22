@@ -8,6 +8,7 @@ using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.OneDrive;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence.Interceptors;
+using SSW_x_Vonage_Clean_Architecture.Infrastructure.Services;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Vonage;
 
 namespace SSW_x_Vonage_Clean_Architecture.Infrastructure;
@@ -85,6 +86,8 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IOneDriveService, OneDriveService>();
+        services.AddHttpClient<ITranscriptSummarizer, OllamaTranscriptSummarizer>();
+
 
         services.AddSingleton(TimeProvider.System);
     }
