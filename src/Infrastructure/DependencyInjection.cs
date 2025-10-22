@@ -1,6 +1,9 @@
+using Azure.Identity;
 using EntityFramework.Exceptions.SqlServer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.OneDrive;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence;
@@ -42,6 +45,44 @@ public static class DependencyInjection
         // Configure OneDrive settings from appsettings.json
         builder.Services.Configure<OneDriveSettings>(
             builder.Configuration.GetSection(OneDriveSettings.SectionName));
+
+        // Register DeviceCodeCredential as Singleton to share token cache across all requests
+        services.AddSingleton<DeviceCodeCredential>(sp =>
+        {
+            var settings = sp.GetRequiredService<IOptions<OneDriveSettings>>().Value;
+            var logger = sp.GetRequiredService<ILogger<DeviceCodeCredential>>();
+
+            return new DeviceCodeCredential(
+                new DeviceCodeCredentialOptions
+                {
+                    TenantId = settings.TenantId,
+                    ClientId = settings.ClientId,
+                    // Enable token caching to disk (persists across app restarts)
+                    TokenCachePersistenceOptions = new TokenCachePersistenceOptions
+                    {
+                        Name = "SSW_Vonage_OneDrive_TokenCache"
+                    },
+                    DeviceCodeCallback = (code, cancellationToken) =>
+                    {
+                        logger.LogWarning("""
+
+                            ============================================
+                            MICROSOFT AUTHENTICATION REQUIRED
+                            ============================================
+                            To sign in, use a web browser to open the page:
+                            {UserCodeUrl}
+
+                            And enter the code: {UserCode}
+                            ============================================
+
+                            """, code.VerificationUri, code.UserCode);
+                        Console.WriteLine($"\n⚠️  AUTHENTICATION REQUIRED ⚠️");
+                        Console.WriteLine($"Open: {code.VerificationUri}");
+                        Console.WriteLine($"Enter code: {code.UserCode}\n");
+                        return Task.CompletedTask;
+                    }
+                });
+        });
 
         services.AddScoped<IOneDriveService, OneDriveService>();
 

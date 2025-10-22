@@ -20,4 +20,18 @@ public interface IOneDriveService
         string fileName,
         string? folderPath = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Uploads a file to OneDrive from a stream
+    /// </summary>
+    /// <param name="fileStream">Stream containing the file data</param>
+    /// <param name="fileName">Desired file name in OneDrive (e.g., "recording_20250115_093022.mp3")</param>
+    /// <param name="folderPath">Optional subfolder path relative to the configured root folder (e.g., "2025-01-15")</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>OneDrive file ID on success, or error if upload fails</returns>
+    Task<ErrorOr<string>> UploadFileFromStreamAsync(
+        Stream fileStream,
+        string fileName,
+        string? folderPath = null,
+        CancellationToken cancellationToken = default);
 }

@@ -24,19 +24,16 @@ internal sealed class OneDriveService : IOneDriveService
     public OneDriveService(
         IOptions<OneDriveSettings> settings,
         ILogger<OneDriveService> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        DeviceCodeCredential credential)
     {
         _settings = settings.Value;
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
 
-        // Initialize Graph Client with Client Credentials authentication
-        var credential = new ClientSecretCredential(
-            _settings.TenantId,
-            _settings.ClientId,
-            _settings.ClientSecret);
-
-        _graphClient = new GraphServiceClient(credential);
+        // Use the injected singleton DeviceCodeCredential
+        // This ensures token cache is shared across all instances
+        _graphClient = new GraphServiceClient(credential, new[] { "https://graph.microsoft.com/.default" });
     }
 
     /// <inheritdoc />
@@ -62,15 +59,68 @@ internal sealed class OneDriveService : IOneDriveService
                     $"Failed to download file from URL. Status: {response.StatusCode}");
             }
 
-            await using var fileStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            // Read the stream into a MemoryStream first
+            // This is necessary because HTTP response streams don't support Length property
+            // which is required by the Microsoft Graph upload API
+            using var memoryStream = new MemoryStream();
+            await using var httpStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await httpStream.CopyToAsync(memoryStream, cancellationToken);
+            memoryStream.Position = 0; // Reset position for reading
 
-            // Upload to OneDrive
-            return await UploadFileFromStreamAsync(fileStream, fileName, folderPath, cancellationToken);
+            _logger.LogInformation("Downloaded {FileSize} bytes from URL", memoryStream.Length);
+
+            // Build full path: /RootFolder/OptionalSubfolder/filename.ext
+            var fullPath = string.IsNullOrWhiteSpace(folderPath)
+                ? $"{_settings.UploadFolderPath}/{fileName}"
+                : $"{_settings.UploadFolderPath}/{folderPath}/{fileName}";
+
+            _logger.LogInformation("Uploading file to OneDrive path: {FullPath}", fullPath);
+
+            // Get user's drive
+            var drive = await GetUserDriveAsync(cancellationToken);
+            if (drive.IsError)
+            {
+                return drive.Errors;
+            }
+
+            // Ensure folder exists
+            var folder = await EnsureFolderExistsAsync(
+                drive.Value,
+                _settings.UploadFolderPath,
+                folderPath,
+                cancellationToken);
+
+            if (folder.IsError)
+            {
+                return folder.Errors;
+            }
+
+            // Decide upload method based on file size
+            const long maxSimpleUploadSize = 4 * 1024 * 1024; // 4MB threshold
+
+            if (memoryStream.Length < maxSimpleUploadSize)
+            {
+                // Simple upload for small files
+                return await SimpleUploadAsync(drive.Value, fullPath, memoryStream, cancellationToken);
+            }
+            else
+            {
+                // Chunked upload for large files
+                return await ChunkedUploadAsync(drive.Value, fullPath, memoryStream, cancellationToken);
+            }
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "Network error downloading file from {FileUrl}", fileUrl);
             return Error.Failure("OneDrive.NetworkError", $"Network error: {ex.Message}");
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Microsoft Graph API error: {ErrorCode} - {ErrorMessage}",
+                ex.Error?.Code, ex.Error?.Message);
+            return Error.Failure(
+                $"OneDrive.GraphError.{ex.Error?.Code ?? "Unknown"}",
+                ex.Error?.Message ?? ex.Message);
         }
         catch (Exception ex)
         {
@@ -79,10 +129,8 @@ internal sealed class OneDriveService : IOneDriveService
         }
     }
 
-    /// <summary>
-    /// Internal method to upload a file from a stream
-    /// </summary>
-    private async Task<ErrorOr<string>> UploadFileFromStreamAsync(
+    /// <inheritdoc />
+    public async Task<ErrorOr<string>> UploadFileFromStreamAsync(
         Stream fileStream,
         string fileName,
         string? folderPath = null,
@@ -119,6 +167,15 @@ internal sealed class OneDriveService : IOneDriveService
             // Decide upload method based on file size
             const long maxSimpleUploadSize = 4 * 1024 * 1024; // 4MB threshold
 
+            // Check if stream supports Length property
+            if (!fileStream.CanSeek)
+            {
+                _logger.LogError("Stream does not support seeking. Cannot determine upload method.");
+                return Error.Failure(
+                    "OneDrive.StreamNotSeekable",
+                    "The provided stream does not support seeking, which is required for upload.");
+            }
+
             if (fileStream.Length < maxSimpleUploadSize)
             {
                 // Simple upload for small files
@@ -146,35 +203,48 @@ internal sealed class OneDriveService : IOneDriveService
     }
 
     /// <summary>
-    /// Gets the user's OneDrive
+    /// Gets the authenticated user's OneDrive using delegated permissions.
+    /// Uses /me/drive endpoint which accesses the signed-in user's OneDrive.
     /// </summary>
     private async Task<ErrorOr<Drive>> GetUserDriveAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var drive = await _graphClient.Users[_settings.UserId]
+            _logger.LogDebug("Retrieving OneDrive for authenticated user");
+
+            // Use /me/drive endpoint - accesses the signed-in user's OneDrive
+            // This requires delegated permissions (Files.ReadWrite)
+            var drive = await _graphClient.Me
                 .Drive
                 .GetAsync(cancellationToken: cancellationToken);
 
             if (drive is null)
             {
-                _logger.LogError("User {UserId} does not have a OneDrive", _settings.UserId);
+                _logger.LogError("Authenticated user does not have a OneDrive");
                 return Error.NotFound(
                     "OneDrive.UserDriveNotFound",
-                    $"User {_settings.UserId} does not have a OneDrive");
+                    "Authenticated user does not have a OneDrive");
             }
 
-            _logger.LogDebug("Retrieved drive {DriveId} for user {UserId}", drive.Id, _settings.UserId);
+            _logger.LogDebug("Retrieved drive {DriveId} for authenticated user", drive.Id);
+
             return drive;
         }
         catch (ODataError ex) when (ex.Error?.Code == "ResourceNotFound")
         {
-            _logger.LogError("User {UserId} not found in Azure AD", _settings.UserId);
-            return Error.NotFound("OneDrive.UserNotFound", $"User {_settings.UserId} not found");
+            _logger.LogError("Resource not found: {ErrorCode}", ex.Error?.Code);
+            return Error.NotFound("OneDrive.ResourceNotFound", ex.Error?.Message ?? "Resource not found");
+        }
+        catch (ODataError ex) when (ex.Error?.Code == "accessDenied")
+        {
+            _logger.LogError(ex, "Access denied. User needs to authenticate or grant consent.");
+            return Error.Failure(
+                "OneDrive.AccessDenied",
+                "Access denied. Ensure you have authenticated and granted consent for Files.ReadWrite permission.");
         }
         catch (ODataError ex)
         {
-            _logger.LogError(ex, "Failed to retrieve user drive: {ErrorCode}", ex.Error?.Code);
+            _logger.LogError(ex, "Failed to retrieve drive: {ErrorCode}", ex.Error?.Code);
             return Error.Failure(
                 $"OneDrive.GetDriveFailed.{ex.Error?.Code}",
                 ex.Error?.Message ?? ex.Message);

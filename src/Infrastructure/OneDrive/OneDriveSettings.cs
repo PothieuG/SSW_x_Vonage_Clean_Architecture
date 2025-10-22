@@ -21,17 +21,6 @@ public sealed class OneDriveSettings
     public required string ClientId { get; init; }
 
     /// <summary>
-    /// Azure AD Client Secret (from Certificates & secrets)
-    /// </summary>
-    public required string ClientSecret { get; init; }
-
-    /// <summary>
-    /// Email address of the OneDrive account owner
-    /// Example: "john.doe@company.com"
-    /// </summary>
-    public required string UserId { get; init; }
-
-    /// <summary>
     /// Root folder path in OneDrive for uploads
     /// Example: "CallRecordings" will create /CallRecordings/ folder
     /// </summary>
