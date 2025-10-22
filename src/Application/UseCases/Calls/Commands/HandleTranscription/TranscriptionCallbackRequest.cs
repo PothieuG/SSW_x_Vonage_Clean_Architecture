@@ -4,27 +4,21 @@ namespace SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.Ha
 
 /// <summary>
 /// Represents the webhook payload sent by Vonage when a transcription is completed.
-/// Based on Vonage Voice API transcription webhook reference.
+/// The webhook contains a URL to download the actual transcription JSON.
 /// </summary>
 public sealed record TranscriptionCallbackRequest
 {
     /// <summary>
-    /// The time the recording started (ISO 8601 format).
+    /// The unique identifier for the conversation/call.
     /// </summary>
-    [JsonPropertyName("start_time")]
-    public string? StartTime { get; init; }
+    [JsonPropertyName("conversation_uuid")]
+    public required string ConversationUuid { get; init; }
 
     /// <summary>
-    /// The URL to the recording that was transcribed.
+    /// The type of event (usually "transcription").
     /// </summary>
-    [JsonPropertyName("recording_url")]
-    public string? RecordingUrl { get; init; }
-
-    /// <summary>
-    /// The size of the recording file in bytes.
-    /// </summary>
-    [JsonPropertyName("size")]
-    public int? Size { get; init; }
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
 
     /// <summary>
     /// The unique identifier for the recording.
@@ -33,62 +27,14 @@ public sealed record TranscriptionCallbackRequest
     public required string RecordingUuid { get; init; }
 
     /// <summary>
-    /// The time the recording ended (ISO 8601 format).
+    /// The status of the transcription (e.g., "completed").
     /// </summary>
-    [JsonPropertyName("end_time")]
-    public string? EndTime { get; init; }
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
 
     /// <summary>
-    /// The unique identifier for the conversation/call.
+    /// The URL to download the transcription JSON (requires JWT authentication).
     /// </summary>
-    [JsonPropertyName("conversation_uuid")]
-    public required string ConversationUuid { get; init; }
-
-    /// <summary>
-    /// The timestamp when this webhook was sent (ISO 8601 format).
-    /// </summary>
-    [JsonPropertyName("timestamp")]
-    public string? Timestamp { get; init; }
-
-    /// <summary>
-    /// The transcribed text from the recording.
-    /// </summary>
-    [JsonPropertyName("text")]
-    public string? Text { get; init; }
-
-    /// <summary>
-    /// The language code used for transcription (e.g., "fr-FR").
-    /// </summary>
-    [JsonPropertyName("language")]
-    public string? Language { get; init; }
-
-    /// <summary>
-    /// Confidence score for the transcription (0.0 to 1.0).
-    /// </summary>
-    [JsonPropertyName("confidence")]
-    public decimal? Confidence { get; init; }
-
-    /// <summary>
-    /// Sentiment analysis results (if enabled).
-    /// </summary>
-    [JsonPropertyName("sentiment")]
-    public SentimentData? Sentiment { get; init; }
-}
-
-/// <summary>
-/// Sentiment analysis data from transcription.
-/// </summary>
-public sealed record SentimentData
-{
-    /// <summary>
-    /// Overall sentiment score (-1.0 to 1.0, where -1 is negative, 0 is neutral, 1 is positive).
-    /// </summary>
-    [JsonPropertyName("score")]
-    public decimal? Score { get; init; }
-
-    /// <summary>
-    /// Sentiment label (e.g., "positive", "negative", "neutral").
-    /// </summary>
-    [JsonPropertyName("label")]
-    public string? Label { get; init; }
+    [JsonPropertyName("transcription_url")]
+    public required string TranscriptionUrl { get; init; }
 }

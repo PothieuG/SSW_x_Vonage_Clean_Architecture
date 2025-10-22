@@ -485,6 +485,8 @@ claude
 HISTORY.md
 docs/VONAGE_INTEGRATION.md
 docs/RECORDING_AND_TRANSCRIPTION.md
+docs/SETUP_USER_SECRETS.md
+docs/ONEDRIVE_INTEGRATION.md
 
 # Environment variables
 src/WebApi/appsettings.Development.json

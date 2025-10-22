@@ -49,12 +49,19 @@ public static class CallEndpoints
             .MapPost("/transcribed", async (
                 ISender sender,
                 TranscriptionCallbackRequest request,
+                ILogger<Program> logger,
                 CancellationToken ct) =>
             {
+                logger.LogInformation(
+                    "Transcription webhook received for conversation {ConversationUuid}, recording {RecordingUuid}",
+                    request.ConversationUuid,
+                    request.RecordingUuid);
+
                 var command = new HandleTranscriptionCommand(request);
                 var result = await sender.Send(command, ct);
+
                 return result.Match(
-                    _ => TypedResults.Ok(new { Message = "Transcription callback processed successfully" }),
+                    _ => TypedResults.NoContent(),
                     CustomResult.Problem);
             })
             .WithName("TranscriptionCallback")

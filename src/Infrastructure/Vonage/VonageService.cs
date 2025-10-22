@@ -1,7 +1,9 @@
+using System.Text.Json;
 using ErrorOr;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
+using SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.HandleTranscription;
 using Vonage;
 using Vonage.Request;
 using Vonage.Voice;
@@ -167,6 +169,91 @@ internal sealed class VonageService : IVonageService
         catch (Exception ex)
         {
             _logger.LogError(ex, "VonageService: Unexpected error downloading recording from {RecordingUrl}", recordingUrl);
+            return Error.Failure("Vonage.UnexpectedError", $"Unexpected error: {ex.Message}");
+        }
+    }
+
+    public async Task<ErrorOr<TranscriptionResult>> DownloadTranscriptionAsync(string transcriptionUrl, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("VonageService: Downloading transcription from {TranscriptionUrl}", transcriptionUrl);
+
+        try
+        {
+            // Generate JWT token for authentication
+            var jwt = new Jwt();
+            var tokenResult = jwt.GenerateToken(_vonageClient.Credentials);
+
+            if (tokenResult.IsFailure)
+            {
+                _logger.LogError("VonageService: Failed to generate JWT token");
+                return Error.Failure("Vonage.JwtGenerationFailed", "Failed to generate JWT token");
+            }
+
+            var token = tokenResult.Match(
+                success => success,
+                failure => throw new InvalidOperationException("Token generation failed"));
+
+            // Create request with JWT authentication
+            using var request = new HttpRequestMessage(HttpMethod.Get, transcriptionUrl);
+            request.Headers.Add("Authorization", $"Bearer {token}");
+
+            // Execute request
+            var response = await _httpClient.SendAsync(request, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError(
+                    "VonageService: Failed to download transcription from {TranscriptionUrl}. Status: {StatusCode}",
+                    transcriptionUrl,
+                    response.StatusCode);
+
+                return Error.Failure(
+                    "Vonage.TranscriptionDownloadFailed",
+                    $"Failed to download transcription. Status: {response.StatusCode}");
+            }
+
+            // Read and parse JSON
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                _logger.LogError("VonageService: Empty transcription response received");
+                return Error.Failure("Vonage.EmptyTranscription", "Empty transcription response received");
+            }
+
+            var transcription = JsonSerializer.Deserialize<TranscriptionResult>(json);
+
+            if (transcription is null)
+            {
+                _logger.LogError("VonageService: Failed to deserialize transcription JSON");
+                return Error.Failure("Vonage.DeserializationFailed", "Failed to deserialize transcription JSON");
+            }
+
+            if (transcription.Channels is null || transcription.Channels.Count == 0)
+            {
+                _logger.LogError("VonageService: Invalid transcription format - no channels found");
+                return Error.Failure("Vonage.InvalidFormat", "Invalid transcription format: no channels found");
+            }
+
+            _logger.LogInformation(
+                "VonageService: Transcription downloaded successfully. Channels: {ChannelCount}",
+                transcription.Channels.Count);
+
+            return transcription;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "VonageService: Network error downloading transcription from {TranscriptionUrl}", transcriptionUrl);
+            return Error.Failure("Vonage.NetworkError", $"Network error: {ex.Message}");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "VonageService: JSON parsing error for transcription from {TranscriptionUrl}", transcriptionUrl);
+            return Error.Failure("Vonage.JsonError", $"JSON parsing error: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "VonageService: Unexpected error downloading transcription from {TranscriptionUrl}", transcriptionUrl);
             return Error.Failure("Vonage.UnexpectedError", $"Unexpected error: {ex.Message}");
         }
     }
