@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
+using SSW_x_Vonage_Clean_Architecture.Infrastructure.MCP;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.OneDrive;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.Persistence.Interceptors;
@@ -85,6 +86,12 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IOneDriveService, OneDriveService>();
+
+        services.AddHttpClient<IMcpService, McpService>(client =>
+        {
+            client.BaseAddress = new Uri("http://localhost:5000/mcp/");
+            client.Timeout = TimeSpan.FromMinutes(2); // Temps long pour les traitements IA
+        });
 
         services.AddSingleton(TimeProvider.System);
     }
