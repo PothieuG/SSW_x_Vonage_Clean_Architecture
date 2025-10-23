@@ -1,233 +1,201 @@
+// ============================================================================
+// MCP CLIENT SERVICE
+// ============================================================================
+//
+// Ce service est le CLIENT MCP qui communique avec le serveur MCP via HTTP.
+//
+// ARCHITECTURE:
+//
+//   McpService (ce fichier)
+//          │
+//          │ HTTP POST http://localhost:5000/mcp/
+//          │ Content-Type: application/json
+//          │ Body: { "jsonrpc": "2.0", "method": "tools/call", "params": {...} }
+//          ↓
+//   MCP Server (Vonage_MCP/McpServer/Program.cs)
+//          │
+//          │ Exécute l'outil "process_transcript"
+//          │ - Détection langue (Ollama)
+//          │ - Traduction si nécessaire (Ollama)
+//          │ - Résumé professionnel (Ollama)
+//          ↓
+//   Réponse: { "jsonrpc": "2.0", "result": { "content": [{ "text": "..." }] } }
+//
+// PROTOCOLE JSON-RPC 2.0:
+// Le serveur MCP utilise le protocole JSON-RPC 2.0 (standard pour RPC en JSON).
+// Voir: https://www.jsonrpc.org/specification
+//
+// TIMEOUT HANDLING:
+// Ce service utilise un HttpClient créé MANUELLEMENT (pas via AddHttpClient)
+// pour bypasser les timeouts Polly de .NET Aspire (voir DependencyInjection.cs).
+// Timeout configuré: Infinite (car Ollama prend 30-60s pour traiter)
+//
+// RÉFÉRENCE COMPLÈTE:
+// - Architecture MCP: docs/MCP_ARCHITECTURE.md
+// - Résolution timeouts: docs/MCP_TIMEOUT_RESOLUTION.md
+//
+// ============================================================================
+
 using System.Text.Json;
 using System.Net.Http.Json;
 using ErrorOr;
 using Microsoft.Extensions.Logging;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
-using OllamaSharp;
 
 namespace SSW_x_Vonage_Clean_Architecture.Infrastructure.MCP;
 
 public class McpService : IMcpService
 {
     private readonly HttpClient _httpClient;
-    private readonly OllamaApiClient _ollama;
     private readonly ILogger<McpService> _logger;
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public McpService(HttpClient httpClient, ILogger<McpService> logger)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _ollama = new OllamaApiClient(
-            uriString: "http://localhost:11434",
-            defaultModel: "llama3.2:3b")
-        {
-            // Configure timeout to 60 seconds for AI generation
-            SelectedModel = "llama3.2:3b"
-        };
     }
 
+    // ========================================================================
+    // MÉTHODE PRINCIPALE: ProcessTranscriptWithMcpAsync
+    // ========================================================================
+    // Envoie un transcript au serveur MCP pour traitement AI complet.
+    //
+    // WORKFLOW:
+    // 1. Construction requête JSON-RPC 2.0 avec l'outil "process_transcript"
+    // 2. POST HTTP vers http://localhost:5000/mcp/
+    // 3. Le serveur MCP exécute (30-60s avec Ollama):
+    //    - Détection de langue
+    //    - Traduction en français (si nécessaire)
+    //    - Résumé professionnel (toujours)
+    // 4. Parse de la réponse JSON-RPC et extraction du texte
+    //
+    // GESTION D'ERREURS:
+    // En cas d'erreur (serveur MCP down, Ollama down, timeout, etc.),
+    // retourne ErrorOr<string> avec l'erreur. L'appelant (Handler) peut
+    // décider de sauvegarder le transcript original sans traitement AI.
+    //
+    // TIMEOUT:
+    // HttpClient configuré avec Timeout.InfiniteTimeSpan (voir DependencyInjection)
+    // pour permettre à Ollama de prendre 30-60s sans timeout.
+    // ========================================================================
     public async Task<ErrorOr<string>> ProcessTranscriptWithMcpAsync(string transcript, CancellationToken cancellationToken = default)
     {
         try
         {
             _logger.LogInformation("Début du traitement MCP du transcript ({Length} caractères)", transcript.Length);
 
-            // 1. Lister les outils disponibles du serveur MCP
-            var tools = await GetAvailableToolsAsync(cancellationToken);
-            if (tools.IsError)
-                return tools.Errors;
-
-            // 2. Demander à l'IA locale de choisir la stratégie de traitement
-            var actionPlan = await CreateActionPlanAsync(transcript, tools.Value, cancellationToken);
-            if (actionPlan.IsError)
-                return actionPlan.Errors;
-
-            // 3. Exécuter le plan d'action
-            var result = await ExecuteActionPlanAsync(actionPlan.Value, cancellationToken);
-            
-            _logger.LogInformation("Traitement MCP terminé avec succès");
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erreur lors du traitement MCP du transcript");
-            return Error.Failure("Mcp.ProcessingError", ex.Message);
-        }
-    }
-
-    private async Task<ErrorOr<JsonElement>> GetAvailableToolsAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
+            // ================================================================
+            // ÉTAPE 1: Construction de la requête JSON-RPC 2.0
+            // ================================================================
+            // Format JSON-RPC 2.0:
+            // {
+            //   "jsonrpc": "2.0",              // Version du protocole (obligatoire)
+            //   "id": 1,                       // ID de la requête (pour matcher réponse)
+            //   "method": "tools/call",        // Méthode MCP à appeler
+            //   "params": {                    // Paramètres de la méthode
+            //     "name": "process_transcript", // Nom de l'outil à exécuter
+            //     "arguments": {               // Arguments de l'outil
+            //       "transcript": "..."        // Le transcript à traiter
+            //     }
+            //   }
+            // }
+            //
+            // L'outil "process_transcript" côté serveur fait:
+            // 1. Détection de langue (via Ollama)
+            // 2. Traduction en français si nécessaire (via Ollama)
+            // 3. Résumé professionnel à la 3ème personne (via Ollama)
+            // ================================================================
             var request = new
             {
                 jsonrpc = "2.0",
                 id = 1,
-                method = "tools.list"
-            };
-
-            var response = await _httpClient.PostAsJsonAsync("", request, cancellationToken);
-            response.EnsureSuccessStatusCode();
-            
-            var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-            return jsonResponse.GetProperty("result").GetProperty("tools");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erreur lors de la récupération des outils MCP");
-            return Error.Failure("Mcp.ToolsListError", ex.Message);
-        }
-    }
-
-    private async Task<ErrorOr<ActionPlan>> CreateActionPlanAsync(string transcript, JsonElement tools, CancellationToken cancellationToken)
-    {
-        var serializedTools = JsonSerializer.Serialize(tools, JsonOptions);
-        var prompt = string.Join(Environment.NewLine, new[]
-        {
-            "Tu dois analyser ce transcript et décider du meilleur traitement à appliquer.",
-            "",
-            "OUTILS DISPONIBLES :",
-            serializedTools,
-            "",
-            "TRANSCRIPT À TRAITER :",
-            $"\"{transcript}\"",
-            "",
-            "CONSIGNES :",
-            "1. Si le transcript n'est pas en français, utilise D'ABORD \"translate_text\" pour le traduire en français",
-            "2. Ensuite, utilise \"summarize_text\" pour créer un résumé concis",
-            "3. Si le transcript est court (< 200 caractères), tu peux sauter l'étape de résumé",
-            "4. Pour l'analyse de sentiment, utilise \"analyze_sentiment\" seulement si c'est pertinent",
-            "",
-            "Réponds UNIQUEMENT avec le JSON suivant :",
-            "",
-            "{",
-            "    \"steps\": [",
-            "        {",
-            "            \"tool\": \"nom_de_l_outil\",",
-            "            \"arguments\": {",
-            "                \"param1\": \"valeur1\",",
-            "                \"param2\": \"valeur2\"",
-            "            },",
-            "            \"reason\": \"Explication du choix\"",
-            "        }",
-            "    ]",
-            "}",
-        });
-
-        try
-        {
-            _logger.LogInformation("Generating action plan with Ollama (transcript length: {Length})", transcript.Length);
-
-            // Use a timeout source separate from the cancellation token
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
-            // Collect the streaming response
-            var responseBuilder = new System.Text.StringBuilder();
-            var startTime = DateTime.UtcNow;
-
-            await foreach (var chunk in _ollama.GenerateAsync(prompt, cancellationToken: linkedCts.Token))
-            {
-                if (chunk?.Response != null)
-                {
-                    responseBuilder.Append(chunk.Response);
-                }
-            }
-
-            var duration = DateTime.UtcNow - startTime;
-            _logger.LogInformation("Ollama generation completed in {Duration}ms", duration.TotalMilliseconds);
-
-            var planText = responseBuilder.ToString().Trim();
-
-            if (string.IsNullOrWhiteSpace(planText))
-            {
-                _logger.LogWarning("Ollama returned empty response");
-                return Error.Failure("Mcp.EmptyResponse", "Ollama returned an empty response");
-            }
-
-            _logger.LogDebug("Raw Ollama response: {Response}", planText);
-
-            // Nettoyer la réponse (parfois Ollama ajoute du texte autour du JSON)
-            var jsonStart = planText.IndexOf('{', StringComparison.Ordinal);
-            var jsonEnd = planText.LastIndexOf('}') + 1;
-
-            if (jsonStart >= 0 && jsonEnd > jsonStart)
-            {
-                planText = planText[jsonStart..jsonEnd];
-            }
-            else
-            {
-                _logger.LogWarning("Could not find valid JSON in Ollama response");
-                return Error.Validation("Mcp.InvalidJsonFormat", "Could not extract JSON from Ollama response");
-            }
-
-            _logger.LogDebug("Extracted JSON: {Json}", planText);
-
-            var plan = JsonSerializer.Deserialize<ActionPlan>(planText);
-            if (plan?.Steps == null || plan.Steps.Count == 0)
-            {
-                _logger.LogWarning("Action plan is empty or invalid");
-                return Error.Validation("Mcp.InvalidPlan", "Le plan d'action généré est invalide");
-            }
-
-            _logger.LogInformation("Plan d'action généré: {StepsCount} étapes", plan.Steps.Count);
-            return plan;
-        }
-        catch (OperationCanceledException ex)
-        {
-            _logger.LogWarning(ex, "Action plan generation was cancelled or timed out");
-            return Error.Failure("Mcp.Timeout", "AI generation timed out after 30 seconds");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erreur lors de la création du plan d'action");
-            return Error.Failure("Mcp.PlanningError", ex.Message);
-        }
-    }
-
-    private async Task<string> ExecuteActionPlanAsync(ActionPlan plan, CancellationToken cancellationToken)
-    {
-        string currentInput = ""; // Sera mis à jour à chaque étape
-
-        foreach (var step in plan.Steps)
-        {
-            _logger.LogInformation("Exécution de l'étape: {Tool} - {Reason}", step.Tool, step.Reason);
-
-            var request = new
-            {
-                jsonrpc = "2.0",
-                id = Guid.NewGuid().GetHashCode(),
-                method = "tools.call",
+                method = "tools/call",
                 @params = new
                 {
-                    name = step.Tool,
-                    arguments = step.Arguments
+                    name = "process_transcript",
+                    arguments = new
+                    {
+                        transcript
+                    }
                 }
             };
 
+            // ================================================================
+            // ÉTAPE 2: Envoi de la requête HTTP POST au serveur MCP
+            // ================================================================
+            // POST http://localhost:5000/mcp/
+            // Content-Type: application/json
+            // Body: <requête JSON-RPC ci-dessus>
+            //
+            // DURÉE ATTENDUE: 30-60 secondes (3 appels Ollama × 10-20s chacun)
+            // HttpClient configuré avec Timeout.InfiniteTimeSpan pour éviter timeout
+            // ================================================================
+            _logger.LogInformation("Envoi du transcript au serveur MCP pour traitement complet");
             var response = await _httpClient.PostAsJsonAsync("", request, cancellationToken);
             response.EnsureSuccessStatusCode();
-            
+
+            // ================================================================
+            // ÉTAPE 3: Parse de la réponse JSON-RPC
+            // ================================================================
+            // Format de réponse MCP (succès):
+            // {
+            //   "jsonrpc": "2.0",
+            //   "id": 1,
+            //   "result": {
+            //     "content": [
+            //       {
+            //         "type": "text",
+            //         "text": "Une personne a appelé pour..."  ← Le résumé AI
+            //       }
+            //     ]
+            //   }
+            // }
+            //
+            // Format de réponse JSON-RPC (erreur):
+            // {
+            //   "jsonrpc": "2.0",
+            //   "id": 1,
+            //   "error": {
+            //     "code": -32603,
+            //     "message": "Tool execution failed: ..."
+            //   }
+            // }
+            // ================================================================
             var jsonResponse = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-            currentInput = jsonResponse.GetProperty("result").GetProperty("output").GetString() ?? "";
 
-            _logger.LogInformation("Résultat de l'étape {Tool}: {ResultLength} caractères", step.Tool, currentInput.Length);
+            // Navigation dans la structure MCP pour extraire le texte
+            // jsonResponse["result"]["content"][0]["text"]
+            var content = jsonResponse.GetProperty("result").GetProperty("content");
+            if (content.ValueKind == JsonValueKind.Array && content.GetArrayLength() > 0)
+            {
+                var firstContent = content[0];
+                var result = firstContent.GetProperty("text").GetString() ?? transcript;
+
+                _logger.LogInformation("Traitement MCP terminé avec succès. Résultat: {Length} caractères", result.Length);
+                return result;
+            }
+
+            // Cas rare: réponse vide (ne devrait jamais arriver)
+            _logger.LogWarning("MCP a retourné une réponse vide, utilisation du transcript original");
+            return transcript;
         }
-
-        return currentInput;
+        catch (Exception ex)
+        {
+            // ================================================================
+            // GESTION D'ERREURS
+            // ================================================================
+            // Erreurs possibles:
+            // - HttpRequestException: Serveur MCP inaccessible (port 5000 fermé)
+            // - TaskCanceledException: CancellationToken annulé
+            // - JsonException: Réponse JSON invalide
+            // - KeyNotFoundException: Structure JSON-RPC incorrecte
+            //
+            // En cas d'erreur, on retourne ErrorOr avec l'erreur.
+            // L'appelant (HandleTranscriptionCommandHandler) peut décider
+            // de sauvegarder uniquement le transcript original sans traitement AI.
+            // ================================================================
+            _logger.LogError(ex, "Erreur lors du traitement MCP du transcript");
+            return Error.Failure("Mcp.ProcessingError", ex.Message);
+        }
     }
-}
-
-// Classes de support
-public class ActionPlan
-{
-    public List<ProcessingStep> Steps { get; set; } = new();
-}
-
-public class ProcessingStep
-{
-    public string Tool { get; set; } = string.Empty;
-    public Dictionary<string, object> Arguments { get; set; } = new();
-    public string Reason { get; set; } = string.Empty;
 }

@@ -87,10 +87,41 @@ public static class DependencyInjection
 
         services.AddScoped<IOneDriveService, OneDriveService>();
 
-        services.AddHttpClient<IMcpService, McpService>(client =>
+        // ============================================================================
+        // MCP SERVICE WITH CUSTOM HTTPCLIENT CONFIGURATION
+        // ============================================================================
+        // PROBLEM: .NET Aspire's AddServiceDefaults() automatically injects Polly
+        // resilience handlers into ALL HttpClients created via AddHttpClient().
+        // These handlers include multiple nested timeouts (AttemptTimeout: 10s,
+        // TotalRequestTimeout: 30s) that CANNOT be fully overridden via configuration.
+        //
+        // WHY THIS IS AN ISSUE FOR MCP:
+        // - MCP service calls Ollama AI which can take 30-60+ seconds to generate responses
+        // - Aspire's default 30s timeout was killing requests mid-processing
+        // - Even after configuring AttemptTimeout and TotalRequestTimeout, hidden timeouts
+        //   in RateLimiter and other Polly strategies were still triggering
+        //
+        // SOLUTION: Create HttpClient manually instead of using AddHttpClient()
+        // This completely bypasses Aspire's automatic Polly injection, giving us
+        // full control over timeouts for long-running AI operations.
+        //
+        // REFERENCE: See docs/MCP_TIMEOUT_RESOLUTION.md for full troubleshooting history
+        // ============================================================================
+        services.AddScoped<IMcpService>(sp =>
         {
-            client.BaseAddress = new Uri("http://localhost:5000/mcp/");
-            client.Timeout = TimeSpan.FromMinutes(2); // Temps long pour les traitements IA
+            var logger = sp.GetRequiredService<ILogger<McpService>>();
+
+            // Create HttpClient manually - bypasses Aspire's AddServiceDefaults()
+            // This prevents automatic injection of Polly resilience handlers
+            var httpClient = new HttpClient
+            {
+                BaseAddress = new Uri("http://localhost:5000/mcp/"),
+                // Infinite timeout - let Ollama take as long as needed (typically 30-60s)
+                // In production, you might want a finite timeout (e.g., 5 minutes)
+                Timeout = Timeout.InfiniteTimeSpan
+            };
+
+            return new McpService(httpClient, logger);
         });
 
         services.AddSingleton(TimeProvider.System);
