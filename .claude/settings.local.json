@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/DataGillesPothieu/ProjectsTemp/Vonage_App_POC/Controllers/**)",
+      "Read(//c/DataGillesPothieu/ProjectsTemp/Vonage_App_POC/Services/**)",
+      "Read(//c/DataGillesPothieu/ProjectsTemp/Vonage_App_POC/Models/Webhooks/**)",
+      "Read(//c/DataGillesPothieu/ProjectsTemp/Vonage_App_POC/Models/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

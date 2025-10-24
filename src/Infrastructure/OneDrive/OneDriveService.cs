@@ -459,4 +459,69 @@ internal sealed class OneDriveService : IOneDriveService
             return Error.Failure($"OneDrive.ChunkedUploadError.{ex.Error?.Code}", ex.Error?.Message ?? ex.Message);
         }
     }
+
+    /// <inheritdoc />
+    public async Task<ErrorOr<string>> GetFolderWebUrlAsync(
+        string? folderPath = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Retrieving web URL for folder: {FolderPath}", folderPath ?? "root");
+
+            // Get user's drive
+            var drive = await GetUserDriveAsync(cancellationToken);
+            if (drive.IsError)
+            {
+                return drive.Errors;
+            }
+
+            // Ensure folder exists (this will create it if needed)
+            var folder = await EnsureFolderExistsAsync(
+                drive.Value,
+                _settings.UploadFolderPath,
+                folderPath,
+                cancellationToken);
+
+            if (folder.IsError)
+            {
+                return folder.Errors;
+            }
+
+            // Get the folder item with webUrl property
+            var folderItem = await _graphClient.Drives[drive.Value.Id]
+                .Items[folder.Value.Id]
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = ["id", "name", "webUrl"];
+                }, cancellationToken);
+
+            if (folderItem?.WebUrl is null)
+            {
+                _logger.LogError("Failed to retrieve web URL for folder {FolderId}", folder.Value.Id);
+                return Error.Failure(
+                    "OneDrive.WebUrlNotFound",
+                    "Failed to retrieve web URL for the folder");
+            }
+
+            _logger.LogInformation("Retrieved web URL for folder {FolderName}: {WebUrl}",
+                folderItem.Name,
+                folderItem.WebUrl);
+
+            return folderItem.WebUrl;
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Microsoft Graph API error retrieving folder URL: {ErrorCode}",
+                ex.Error?.Code);
+            return Error.Failure(
+                $"OneDrive.GetUrlFailed.{ex.Error?.Code ?? "Unknown"}",
+                ex.Error?.Message ?? ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error retrieving folder web URL");
+            return Error.Failure("OneDrive.UnexpectedError", $"Unexpected error: {ex.Message}");
+        }
+    }
 }

@@ -127,6 +127,71 @@ internal sealed class HandleTranscriptionCommandHandler : IRequestHandler<Handle
             "Transcription and processed content for {RecordingUuid} uploaded successfully to OneDrive",
             webhookRequest.RecordingUuid);
 
+        // Step 7: Retrieve OneDrive folder URL to include in SMS
+        _logger.LogInformation("Retrieving OneDrive folder URL for folder {FolderPath}", folderPath);
+
+        var folderUrlResult = await _oneDriveService.GetFolderWebUrlAsync(folderPath, cancellationToken);
+
+        string? oneDriveFolderUrl = null;
+        if (folderUrlResult.IsError)
+        {
+            _logger.LogWarning(
+                "Failed to retrieve OneDrive folder URL: {Error}. SMS will not include folder link.",
+                folderUrlResult.FirstError.Description);
+        }
+        else
+        {
+            oneDriveFolderUrl = folderUrlResult.Value;
+            _logger.LogInformation("OneDrive folder URL retrieved: {FolderUrl}", oneDriveFolderUrl);
+        }
+
+        // Step 8: Retrieve call information to get the phone number
+        _logger.LogInformation("Retrieving call information for conversation {ConversationUuid}", webhookRequest.ConversationUuid);
+
+        var callInfoResult = await _vonageService.GetCallByConversationUuidAsync(
+            webhookRequest.ConversationUuid,
+            cancellationToken);
+
+        if (callInfoResult.IsError)
+        {
+            _logger.LogWarning(
+                "Failed to retrieve call information for {ConversationUuid}: {Error}. SMS will not be sent.",
+                webhookRequest.ConversationUuid,
+                callInfoResult.FirstError.Description);
+
+            // Don't fail the entire operation if SMS fails - files were already uploaded successfully
+            return Result.Success;
+        }
+
+        var callInfo = callInfoResult.Value;
+
+        // Step 9: Build SMS message with summary and OneDrive link
+        var smsMessage = BuildSmsMessage(callInfo.DurationSeconds, processedContent, oneDriveFolderUrl);
+
+        // Step 10: Send SMS notification to the person who received the call
+        _logger.LogInformation("Sending SMS notification to {PhoneNumber}", callInfo.ToPhoneNumber);
+
+        var smsResult = await _vonageService.SendSmsAsync(
+            callInfo.ToPhoneNumber,
+            smsMessage,
+            cancellationToken);
+
+        if (smsResult.IsError)
+        {
+            _logger.LogWarning(
+                "Failed to send SMS to {PhoneNumber}: {Error}",
+                callInfo.ToPhoneNumber,
+                smsResult.FirstError.Description);
+
+            // Don't fail the entire operation if SMS fails - files were already uploaded successfully
+            return Result.Success;
+        }
+
+        _logger.LogInformation(
+            "SMS sent successfully to {PhoneNumber}. Message ID: {MessageId}",
+            callInfo.ToPhoneNumber,
+            smsResult.Value);
+
         return Result.Success;
     }
 
@@ -208,5 +273,54 @@ internal sealed class HandleTranscriptionCommandHandler : IRequestHandler<Handle
         var durationMs = transcriptionResult.Channels.Count > 0 ? transcriptionResult.Channels[0].Duration : 0;
         var durationSeconds = durationMs / 1000.0;
         return durationSeconds.ToString("F2", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Builds an SMS message with call summary and OneDrive folder link.
+    /// SMS Cost Information (Vonage):
+    /// - 1 SMS = 160 chars (GSM-7 encoding) or 70 chars (Unicode/Emoji)
+    /// - Messages are concatenated automatically if longer
+    /// - Typical costs: €0.05-0.10 per SMS segment
+    ///
+    /// Current configuration: ~640 chars max = 10 SMS segments ≈ €0.50-1.00 per message
+    /// Adjust maxSummaryLength below to control costs vs. completeness.
+    /// </summary>
+    private static string BuildSmsMessage(int durationSeconds, string summary, string? oneDriveFolderUrl)
+    {
+        var messageBuilder = new StringBuilder();
+        messageBuilder.AppendLine("📞 Nouveau message vocal");
+        messageBuilder.AppendLine(CultureInfo.InvariantCulture, $"Durée: {durationSeconds}s");
+        messageBuilder.AppendLine();
+
+        // Vonage automatically concatenates long SMS messages
+        // Each segment = 160 chars (GSM-7) or 70 chars (with emojis/Unicode)
+        //
+        // Recommended limits based on cost tolerance:
+        // - 140 chars  = 1-2 SMS  (~€0.05-0.20)  - Very brief
+        // - 300 chars  = 3-5 SMS  (~€0.15-0.50)  - Concise summary
+        // - 640 chars  = 6-10 SMS (~€0.30-1.00)  - Detailed summary ⭐ Current setting
+        // - 1000 chars = 10-15 SMS (~€0.50-1.50) - Full summary
+        // - No limit   = Full AI output (could be expensive!)
+
+        // Reserve space for OneDrive link if present (typically ~100 chars)
+        var oneDriveLinkLength = !string.IsNullOrWhiteSpace(oneDriveFolderUrl) ? oneDriveFolderUrl.Length + 20 : 0;
+        var maxSummaryLength = 640 - oneDriveLinkLength; // Adjust based on OneDrive link presence
+
+        var truncatedSummary = summary.Length > maxSummaryLength
+            ? summary[..maxSummaryLength] + "..."
+            : summary;
+
+        messageBuilder.Append(truncatedSummary);
+
+        // Add OneDrive folder link at the end if available
+        if (!string.IsNullOrWhiteSpace(oneDriveFolderUrl))
+        {
+            messageBuilder.AppendLine();
+            messageBuilder.AppendLine();
+            messageBuilder.Append("📁 Fichiers: ");
+            messageBuilder.Append(oneDriveFolderUrl);
+        }
+
+        return messageBuilder.ToString();
     }
 }

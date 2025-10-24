@@ -34,4 +34,14 @@ public interface IOneDriveService
         string fileName,
         string? folderPath = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the web URL for a OneDrive folder that can be shared with users
+    /// </summary>
+    /// <param name="folderPath">Optional subfolder path relative to the configured root folder (e.g., "2025-01-15")</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Web URL to the folder on success, or error if retrieval fails</returns>
+    Task<ErrorOr<string>> GetFolderWebUrlAsync(
+        string? folderPath = null,
+        CancellationToken cancellationToken = default);
 }

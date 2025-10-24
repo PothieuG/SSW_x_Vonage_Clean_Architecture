@@ -4,6 +4,7 @@ using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
 using SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.HandleRecording;
 using SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.HandleTranscription;
 using SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.InitiateCall;
+using SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.SendSms;
 using SSW_x_Vonage_Clean_Architecture.Infrastructure.OneDrive;
 using SSW_x_Vonage_Clean_Architecture.WebApi.Extensions;
 
@@ -183,5 +184,27 @@ public static class CallEndpoints
             .Produces(200)
             .Produces(400)
             .AllowAnonymous(); // For debugging purposes
+
+        // SMS sending endpoint for testing
+        group
+            .MapPost("/send-sms", async (
+                ISender sender,
+                SendSmsCommand command,
+                CancellationToken ct) =>
+            {
+                var result = await sender.Send(command, ct);
+                return result.Match(
+                    messageId => TypedResults.Ok(new
+                    {
+                        Success = true,
+                        MessageId = messageId,
+                        Message = "SMS sent successfully"
+                    }),
+                    CustomResult.Problem);
+            })
+            .WithName("SendSms")
+            .WithDescription("Send an SMS message via Vonage. Useful for testing SMS functionality.")
+            .ProducesPost()
+            .AllowAnonymous(); // For testing purposes
     }
 }

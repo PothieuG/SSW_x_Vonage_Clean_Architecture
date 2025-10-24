@@ -5,6 +5,9 @@ using Microsoft.Extensions.Options;
 using SSW_x_Vonage_Clean_Architecture.Application.Common.Interfaces;
 using SSW_x_Vonage_Clean_Architecture.Application.UseCases.Calls.Commands.HandleTranscription;
 using Vonage;
+using Vonage.Common.Failures;
+using Vonage.Messages;
+using Vonage.Messages.Sms;
 using Vonage.Request;
 using Vonage.Voice;
 using Vonage.Voice.Nccos;
@@ -255,6 +258,139 @@ internal sealed class VonageService : IVonageService
         {
             _logger.LogError(ex, "VonageService: Unexpected error downloading transcription from {TranscriptionUrl}", transcriptionUrl);
             return Error.Failure("Vonage.UnexpectedError", $"Unexpected error: {ex.Message}");
+        }
+    }
+
+    public async Task<ErrorOr<string>> SendSmsAsync(string toPhoneNumber, string messageText, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "VonageService: Sending SMS to {PhoneNumber}. Message length: {Length} characters",
+            toPhoneNumber,
+            messageText.Length);
+
+        try
+        {
+            // Validate inputs
+            if (string.IsNullOrWhiteSpace(toPhoneNumber))
+            {
+                _logger.LogError("VonageService: Invalid phone number - null or empty");
+                return Error.Validation("Vonage.InvalidPhoneNumber", "Phone number cannot be null or empty");
+            }
+
+            if (string.IsNullOrWhiteSpace(messageText))
+            {
+                _logger.LogError("VonageService: Invalid message text - null or empty");
+                return Error.Validation("Vonage.InvalidMessageText", "Message text cannot be null or empty");
+            }
+
+            // Ensure we have a configured FromNumber for SMS
+            if (string.IsNullOrWhiteSpace(_settings.FromNumber))
+            {
+                _logger.LogError("VonageService: FromNumber is not configured in VonageSettings");
+                return Error.Failure("Vonage.ConfigurationError", "SMS sender number (FromNumber) is not configured");
+            }
+
+            // Create SMS request using Vonage SDK
+            var smsRequest = new SmsRequest
+            {
+                From = _settings.FromNumber,
+                To = toPhoneNumber,
+                Text = messageText
+            };
+
+            // Send SMS using Vonage Messages API
+            var messagesClient = _vonageClient.MessagesClient;
+            var response = await messagesClient.SendAsync(smsRequest);
+
+            // The Vonage SDK returns a SendMessageResponse
+            // Extract the message UUID which serves as the message ID
+            var messageId = response.MessageUuid.ToString();
+
+            _logger.LogInformation(
+                "VonageService: SMS sent successfully to {PhoneNumber}. Message ID: {MessageId}",
+                toPhoneNumber,
+                messageId);
+
+            return messageId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "VonageService: Error sending SMS to {PhoneNumber}", toPhoneNumber);
+            return Error.Failure("Vonage.SmsSendFailed", $"Failed to send SMS: {ex.Message}");
+        }
+    }
+
+    public async Task<ErrorOr<CallInfo>> GetCallByConversationUuidAsync(string conversationUuid, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("VonageService: Retrieving call information for conversation {ConversationUuid}", conversationUuid);
+
+        try
+        {
+            // Validate input
+            if (string.IsNullOrWhiteSpace(conversationUuid))
+            {
+                _logger.LogError("VonageService: Invalid conversation UUID - null or empty");
+                return Error.Validation("Vonage.InvalidConversationUuid", "Conversation UUID cannot be null or empty");
+            }
+
+            // Search for calls by conversation UUID using Vonage Voice API
+            var searchFilter = new CallSearchFilter
+            {
+                ConversationUuid = conversationUuid
+            };
+
+            var callsResponse = await _vonageClient.VoiceClient.GetCallsAsync(searchFilter);
+
+            // Check if any calls were found
+            if (callsResponse?.Embedded?.Calls == null || callsResponse.Embedded.Calls.Count == 0)
+            {
+                _logger.LogWarning(
+                    "VonageService: No calls found for conversation {ConversationUuid}",
+                    conversationUuid);
+
+                return Error.NotFound(
+                    "Vonage.CallNotFound",
+                    $"No call found for conversation UUID: {conversationUuid}");
+            }
+
+            // Get the first call (there should typically only be one per conversation UUID)
+            var call = callsResponse.Embedded.Calls.First();
+
+            // Extract call information
+            var toPhoneNumber = call.To?.Number ?? string.Empty;
+            var fromPhoneNumber = call.From?.Number;
+
+            // Duration is a string in the Vonage SDK (e.g., "30") - parse to int
+            var durationSeconds = 0;
+            if (!string.IsNullOrWhiteSpace(call.Duration) && int.TryParse(call.Duration, out var parsedDuration))
+            {
+                durationSeconds = parsedDuration;
+            }
+
+            if (string.IsNullOrWhiteSpace(toPhoneNumber))
+            {
+                _logger.LogError(
+                    "VonageService: Call found but 'To' phone number is missing for conversation {ConversationUuid}",
+                    conversationUuid);
+
+                return Error.Failure(
+                    "Vonage.MissingPhoneNumber",
+                    "Call record found but recipient phone number is missing");
+            }
+
+            var callInfo = new CallInfo(toPhoneNumber, fromPhoneNumber, durationSeconds);
+
+            _logger.LogInformation(
+                "VonageService: Call information retrieved successfully. To: {ToNumber}, Duration: {Duration}s",
+                toPhoneNumber,
+                durationSeconds);
+
+            return callInfo;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "VonageService: Error retrieving call for conversation {ConversationUuid}", conversationUuid);
+            return Error.Failure("Vonage.GetCallFailed", $"Failed to retrieve call information: {ex.Message}");
         }
     }
 }

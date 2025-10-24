@@ -21,4 +21,30 @@ public interface IVonageService
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The parsed transcription result</returns>
     Task<ErrorOr<TranscriptionResult>> DownloadTranscriptionAsync(string transcriptionUrl, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends an SMS message via Vonage SMS API.
+    /// </summary>
+    /// <param name="toPhoneNumber">Recipient phone number in E.164 format (e.g., +33612345678)</param>
+    /// <param name="messageText">SMS message content (max 160 characters for single SMS, longer messages are split)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Success result with message ID on success, or error details on failure</returns>
+    Task<ErrorOr<string>> SendSmsAsync(string toPhoneNumber, string messageText, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves call details from Vonage Voice API using conversation UUID.
+    /// </summary>
+    /// <param name="conversationUuid">The unique conversation identifier</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Call information including phone numbers and duration</returns>
+    Task<ErrorOr<CallInfo>> GetCallByConversationUuidAsync(string conversationUuid, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Represents essential call information retrieved from Vonage Voice API.
+/// </summary>
+public sealed record CallInfo(
+    string ToPhoneNumber,
+    string? FromPhoneNumber,
+    int DurationSeconds);
+
